@@ -26,10 +26,10 @@
 // The URL of your MissingDrop WSS bridge server
 // For local testing:  "ws://192.168.1.100:3000/ws"
 // For Render deploy:  "wss://your-app.onrender.com/ws"
-#define WSS_SERVER_HOST "your-app.onrender.com"
+#define WSS_SERVER_HOST "your-app.onrender.com"  // bare hostname, no wss:// prefix
 #define WSS_SERVER_PORT 443
 #define WSS_SERVER_PATH "/ws"
-#define WSS_USE_SSL     1  // 1 for wss://, 0 for ws://
+#define WS_SECURE       true  // false = WS, true = WSS
 
 // ─── Pair Configuration ─────────────────────────────────────────────────────
 // Which pair this matrix belongs to (1 or 2)

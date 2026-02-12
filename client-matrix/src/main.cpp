@@ -12,7 +12,7 @@
  *
  * Dependencies:
  *   - SmartMatrix: https://github.com/Kameeno/SmartMatrix
- *   - ArduinoWebsockets: https://github.com/gilmaimon/ArduinoWebsockets
+ *   - WebSockets: https://github.com/links2004/arduinoWebSockets
  */
 
 // ─── Configuration ───────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <ArduinoWebsockets.h>
+#include <WebSocketsClient.h>
 #include <ArduinoJson.h>
 
 #if USE_ENTERPRISE_WIFI
@@ -62,11 +62,10 @@ const uint16_t BUFFER_SIZE = NUM_LEDS * (INCOMING_COLOR_DEPTH / 8);
 
 static uint8_t frameBuf[BUFFER_SIZE] __attribute__((aligned(4)));
 static uint32_t frameCount = 0;
-static uint32_t lastReconnectAttempt = 0;
 static bool wsConnected = false;
 
-using namespace websockets;
-WebsocketsClient wsClient;
+WebSocketsClient* webSocket = nullptr;
+static uint8_t disconnectedCounter = 0;
 
 // ─── WiFi Connection ─────────────────────────────────────────────────────────
 
@@ -138,26 +137,14 @@ void displayFrame(const uint8_t* data, size_t length) {
     frameCount++;
 }
 
-// ─── WebSocket Callbacks ─────────────────────────────────────────────────────
+// ─── WebSocket Event Handler ─────────────────────────────────────────────────
 
-void onWsMessage(WebsocketsMessage message) {
-    if (message.isBinary()) {
-        // Binary frame: RGB565 pixel data
-        const uint8_t* data = (const uint8_t*)message.c_str();
-        size_t length = message.length();
-        displayFrame(data, length);
-    } else {
-        // JSON message from server
-        Serial.print("WS message: ");
-        Serial.println(message.data());
-    }
-}
-
-void onWsEvent(WebsocketsEvent event, String data) {
-    switch (event) {
-        case WebsocketsEvent::ConnectionOpened:
-            Serial.println("WS connected!");
+void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+    switch (type) {
+        case WStype_CONNECTED:
+            Serial.println("[WS] Connected.");
             wsConnected = true;
+            disconnectedCounter = 0;
             digitalWrite(PICO_LED_PIN, HIGH);
 
             // Send join message
@@ -165,39 +152,66 @@ void onWsEvent(WebsocketsEvent event, String data) {
                 char joinMsg[64];
                 snprintf(joinMsg, sizeof(joinMsg),
                     "{\"type\":\"join\",\"role\":\"matrix\",\"pair\":%d}", PAIR_ID);
-                wsClient.send(joinMsg);
-                Serial.printf("Joined as matrix, pair %d\n", PAIR_ID);
+                webSocket->sendTXT(joinMsg);
+                Serial.printf("[WS] Joined as matrix, pair %d\n", PAIR_ID);
             }
             break;
 
-        case WebsocketsEvent::ConnectionClosed:
-            Serial.println("WS disconnected.");
+        case WStype_TEXT:
+            Serial.printf("[WS] Message: %s\n", payload);
+            break;
+
+        case WStype_BIN:
+            // Binary frame: RGB565 pixel data
+            displayFrame(payload, length);
+            break;
+
+        case WStype_DISCONNECTED:
+            Serial.println("[WS] Disconnected.");
             wsConnected = false;
+            disconnectedCounter++;
             digitalWrite(PICO_LED_PIN, LOW);
+            if (disconnectedCounter >= 3) {
+                Serial.printf("[WS] Disconnected %d times, checking WiFi...\n", disconnectedCounter);
+                if (WiFi.status() != WL_CONNECTED) {
+                    connectWiFi();
+                }
+            }
             break;
 
-        case WebsocketsEvent::GotPing:
-            // ArduinoWebsockets auto-responds with pong
+        case WStype_ERROR:
+            Serial.printf("[WS] Error: %s\n", payload);
             break;
 
-        case WebsocketsEvent::GotPong:
+        default:
             break;
     }
 }
 
 // ─── WebSocket Connection ────────────────────────────────────────────────────
 
-void connectWebSocket() {
-    Serial.println("Connecting to WebSocket server...");
+void setupWebSocket() {
+    if (webSocket) {
+        webSocket->disconnect();
+        delay(100);
+        delete webSocket;
+    }
 
-    wsClient.onMessage(onWsMessage);
-    wsClient.onEvent(onWsEvent);
+    webSocket = new WebSocketsClient();
 
-#if WSS_USE_SSL
-    wsClient.connect(WSS_SERVER_HOST, WSS_SERVER_PORT, WSS_SERVER_PATH);
-#else
-    wsClient.connect(WSS_SERVER_HOST, WSS_SERVER_PORT, WSS_SERVER_PATH);
-#endif
+    if (WS_SECURE) {
+        webSocket->beginSSL(WSS_SERVER_HOST, WSS_SERVER_PORT, WSS_SERVER_PATH);
+        Serial.println("[WS] Using secure WebSocket connection (WSS)");
+    } else {
+        webSocket->begin(WSS_SERVER_HOST, WSS_SERVER_PORT, WSS_SERVER_PATH);
+        Serial.println("[WS] Using non-secure WebSocket connection (WS)");
+    }
+
+    webSocket->onEvent(onWebSocketEvent);
+    webSocket->setReconnectInterval(5000);
+
+    Serial.printf("[WS] Connecting to %s://%s:%d%s ...\n",
+        WS_SECURE ? "wss" : "ws", WSS_SERVER_HOST, WSS_SERVER_PORT, WSS_SERVER_PATH);
 }
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
@@ -230,31 +244,21 @@ void setup() {
     connectWiFi();
 
     // Connect WebSocket
-    connectWebSocket();
+    setupWebSocket();
 }
 
 // ─── Loop ────────────────────────────────────────────────────────────────────
 
 void loop() {
-    // Poll WebSocket for incoming messages
-    if (wsConnected) {
-        wsClient.poll();
-    }
-
-    // Auto-reconnect if disconnected
-    if (!wsConnected && WiFi.status() == WL_CONNECTED) {
-        uint32_t now = millis();
-        if (now - lastReconnectAttempt > WS_RECONNECT_DELAY) {
-            lastReconnectAttempt = now;
-            Serial.println("Attempting WS reconnect...");
-            connectWebSocket();
-        }
+    // Process WebSocket events (reconnect is handled internally)
+    if (webSocket) {
+        webSocket->loop();
     }
 
     // Reconnect WiFi if lost
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("WiFi lost — reconnecting...");
         connectWiFi();
-        connectWebSocket();
+        setupWebSocket();
     }
 }
