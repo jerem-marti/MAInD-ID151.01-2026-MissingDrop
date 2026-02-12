@@ -140,6 +140,77 @@ export function getIndexFingerTip(results) {
     }
 }
 
+// ─── Pinch Detection ─────────────────────────────────────────────────────────
+
+/**
+ * Check if the thumb and index finger are pinched together.
+ * Uses the 3D Euclidean distance between THUMB_TIP (4) and INDEX_FINGER_TIP (8).
+ * @param {object} results - MediaPipe hand results
+ * @param {number} [threshold=0.07] - Normalized distance threshold (0–1 space)
+ * @returns {boolean} true if pinching
+ */
+export function isPinching(results, threshold = 0.07) {
+    if (!results || !results.landmarks || results.landmarks.length === 0) {
+        return false
+    }
+
+    const landmarks = results.landmarks[0]
+    const thumb = landmarks[4]  // THUMB_TIP
+    const index = landmarks[8]  // INDEX_FINGER_TIP
+
+    const dx = thumb.x - index.x
+    const dy = thumb.y - index.y
+    const dz = (thumb.z || 0) - (index.z || 0)
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    return dist < threshold
+}
+
+// ─── Open Hand Detection ─────────────────────────────────────────────────────
+
+/**
+ * Check if the hand is fully open (all 5 fingers extended).
+ * @param {object} results - MediaPipe hand results
+ * @returns {boolean} true if open hand
+ */
+export function isOpenHand(results) {
+    if (!results || !results.landmarks || results.landmarks.length === 0) {
+        return false
+    }
+
+    const landmarks = results.landmarks[0]
+    const wrist = landmarks[0]
+
+    // Helper: dist^2 between point and wrist
+    function distSq(idx) {
+        const dx = landmarks[idx].x - wrist.x
+        const dy = landmarks[idx].y - wrist.y
+        const dz = (landmarks[idx].z || 0) - (wrist.z || 0)
+        return dx * dx + dy * dy + dz * dz
+    }
+
+    // Check if TIP is further from wrist than PIP for fingers
+    // Landmarks:
+    // Thumb: 4 (Tip), 2 (MCP) -- Thumb is tricky, let's use simple distance check for now
+    // Index: 8 (Tip), 6 (PIP)
+    // Middle: 12 (Tip), 10 (PIP)
+    // Ring: 16 (Tip), 14 (PIP)
+    // Pinky: 20 (Tip), 18 (PIP)
+
+    const tips = [4, 8, 12, 16, 20]
+    const pips = [2, 6, 10, 14, 18] // Using MCP for thumb, PIP for others
+
+    let openCount = 0
+    for (let i = 0; i < 5; i++) {
+        if (distSq(tips[i]) > distSq(pips[i])) {
+            openCount++
+        }
+    }
+
+    // Require all 5 fingers to be extended
+    return openCount === 5
+}
+
 // ─── Tap Detection State ─────────────────────────────────────────────────────
 
 const TAP_HISTORY_SIZE = 8     // Number of frames to track

@@ -171,31 +171,77 @@ function stopTracking() {
     log('Hand tracking stopped.')
 }
 
-// ─── Hand → Water Drop ──────────────────────────────────────────────────────
+// ─── Hand → Water Drop & Color Control ───────────────────────────────────────
+
+function hslToRgb(h, s, l) {
+    s /= 100;
+    l /= 100;
+    const k = n => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return {
+        r: Math.round(255 * f(0)),
+        g: Math.round(255 * f(8)),
+        b: Math.round(255 * f(4))
+    };
+}
+
+function rgbToHex(r, g, b) {
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
 
 function processHandDetection() {
     const results = Hand.detect()
     if (!results) return
 
     const pos = Hand.getIndexFingerTip(results)
+    const pinching = Hand.isPinching(results) // Kept but unused for now
     const tapping = Hand.isTapping(results)
+    const openHand = Hand.isOpenHand(results)
 
-    if (pos && tapping) {
-        if (wasNotTapping || continuousDrop) {
-            // Trigger LOCAL drop
-            localWater.dropAt(pos.x, pos.y)
+    if (pos) {
+        // ─── COLOR CONTROL (OPEN HAND) ───
+        if (openHand) {
+            // Map X (0-31) to Hue (0-360)
+            // Map Y (0-31) to Lightness (100-0) -- Up is Lighter
 
-            // Broadcast drop to remote (with our color)
-            // Use current parameter settings for strength/radius
-            const s = localWater.getDropStrength()
-            const r = localWater.getDropRadius()
-            sendDrop(pos.x, pos.y, s, r, localTint.r, localTint.g, localTint.b)
+            const hue = Math.round((pos.x / MATRIX_SIZE) * 360)
+            const lightness = Math.round(100 - (pos.y / MATRIX_SIZE) * 100)
+            const saturation = 100 // Keep valid vivid color
 
-            if (wasNotTapping) {
-                log(`💧 Drop at (${pos.x}, ${pos.y})`)
-            }
+            // Convert HSL -> RGB
+            const rgb = hslToRgb(hue, saturation, lightness)
+
+            // Update local state
+            localTint = rgb
+
+            // Update UI (optional smoothness check could be added)
+            colorPicker.value = rgbToHex(rgb.r, rgb.g, rgb.b)
+
+            // Visual feedback via log (throttled/optional)
+            // log(`Color: H${hue} L${lightness}`)
         }
-        wasNotTapping = false
+
+        // ─── DROP TRIGGER (TAP) ───
+        // Only allow tapping if NOT in open hand mode to avoid conflicts
+        if (tapping && !openHand) {
+            if (wasNotTapping || continuousDrop) {
+                // Trigger LOCAL drop
+                localWater.dropAt(pos.x, pos.y)
+
+                // Broadcast drop to remote (with our color)
+                const s = localWater.getDropStrength()
+                const r = localWater.getDropRadius()
+                sendDrop(pos.x, pos.y, s, r, localTint.r, localTint.g, localTint.b)
+
+                if (wasNotTapping) {
+                    log(`💧 Drop at (${pos.x}, ${pos.y})`)
+                }
+            }
+            wasNotTapping = false
+        } else {
+            wasNotTapping = true
+        }
     } else {
         wasNotTapping = true
     }
