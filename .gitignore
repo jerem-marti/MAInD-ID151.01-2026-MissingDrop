@@ -1,0 +1,4 @@
+node_modules/
+.pio/
+.vscode/
+client-matrix/src/config.h

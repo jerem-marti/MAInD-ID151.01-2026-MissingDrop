@@ -1,0 +1,14 @@
+{
+  "name": "missing-drop-server",
+  "version": "1.0.0",
+  "description": "WSS bridge server for MissingDrop — pairs smartphones with LED matrices",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  }
+}

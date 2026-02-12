@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<title>MissingDrop — 32×32 Matrix</title>
+	<meta name="description" content="MissingDrop: MediaPipe hand tracking + water simulation sent over WebSocket to a 32×32 LED matrix.">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+	<style>
+		* {
+			box-sizing: border-box;
+			margin: 0;
+			padding: 0;
+		}
+
+		body {
+			font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+			background-color: #0d1117;
+			color: #c9d1d9;
+			padding: 1rem;
+			min-height: 100vh;
+			min-height: 100dvh;
+		}
+
+		h1 {
+			font-size: 1.3rem;
+			font-weight: 600;
+			margin-bottom: 0.2rem;
+			background: linear-gradient(135deg, #58a6ff, #79c0ff);
+			-webkit-background-clip: text;
+			-webkit-text-fill-color: transparent;
+			background-clip: text;
+		}
+
+		h1 span {
+			font-weight: 300;
+			opacity: 0.6;
+		}
+
+		p.subtitle {
+			font-size: 0.78rem;
+			color: #6e7681;
+			margin-bottom: 1rem;
+		}
+
+		/* ── Layout ────────────────────────────────────────── */
+
+		.container {
+			display: flex;
+			gap: 1rem;
+			flex-wrap: wrap;
+		}
+
+		.panel {
+			background: #161b22;
+			border-radius: 10px;
+			padding: 1rem;
+			border: 1px solid #30363d;
+			flex: 1;
+			min-width: 280px;
+		}
+
+		.panel h2 {
+			font-size: 0.72rem;
+			text-transform: uppercase;
+			letter-spacing: 0.1em;
+			font-weight: 500;
+			color: #58a6ff;
+			margin-bottom: 0.7rem;
+		}
+
+		/* ── Video & Canvas ────────────────────────────────── */
+
+		.preview-area {
+			display: flex;
+			gap: 1rem;
+			align-items: flex-start;
+			flex-wrap: wrap;
+			justify-content: center;
+		}
+
+		.canvas-box {
+			text-align: center;
+		}
+
+		.canvas-box label {
+			display: block;
+			font-size: 0.7rem;
+			color: #6e7681;
+			margin-bottom: 0.2rem;
+		}
+
+		video {
+			width: 200px;
+			height: 150px;
+			object-fit: cover;
+			border-radius: 6px;
+			background: #000;
+			transform: scaleX(-1);
+		}
+
+		video.hidden {
+			display: none;
+		}
+
+		canvas {
+			display: block;
+			image-rendering: pixelated;
+			background: #000;
+			border-radius: 4px;
+		}
+
+		#matrixCanvas {
+			width: 150px;
+			height: 150px;
+			border: 2px solid #58a6ff;
+			box-shadow: 0 0 20px rgba(88, 166, 255, 0.15);
+		}
+
+		/* ── Buttons ───────────────────────────────────────── */
+
+		.controls {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.4rem;
+			margin-top: 0.6rem;
+		}
+
+		button {
+			padding: 0.45rem 0.85rem;
+			border: 1px solid #30363d;
+			border-radius: 6px;
+			background: #21262d;
+			color: #c9d1d9;
+			font-family: inherit;
+			font-size: 0.8rem;
+			cursor: pointer;
+			transition: all 0.15s ease;
+		}
+
+		button:hover {
+			background: #30363d;
+			border-color: #484f58;
+		}
+
+		button:disabled {
+			opacity: 0.35;
+			cursor: not-allowed;
+		}
+
+		button.active {
+			background: #58a6ff;
+			border-color: #58a6ff;
+			color: #0d1117;
+			font-weight: 500;
+		}
+
+		button.primary {
+			background: linear-gradient(135deg, #238636, #2ea043);
+			border-color: #238636;
+			color: #fff;
+			font-weight: 500;
+		}
+
+		button.primary:hover {
+			background: linear-gradient(135deg, #2ea043, #3fb950);
+		}
+
+		/* ── Settings ──────────────────────────────────────── */
+
+		.setting {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			margin-bottom: 0.4rem;
+			font-size: 0.8rem;
+		}
+
+		.setting label {
+			min-width: 90px;
+			color: #8b949e;
+			font-size: 0.78rem;
+		}
+
+		input[type="range"] {
+			flex: 1;
+			max-width: 130px;
+			accent-color: #58a6ff;
+		}
+
+		input[type="color"] {
+			width: 32px;
+			height: 26px;
+			border: 1px solid #30363d;
+			border-radius: 4px;
+			background: none;
+			cursor: pointer;
+			padding: 0;
+		}
+
+		select, input[type="text"] {
+			padding: 0.35rem 0.5rem;
+			border: 1px solid #30363d;
+			border-radius: 6px;
+			background: #0d1117;
+			color: #c9d1d9;
+			font-family: inherit;
+			font-size: 0.78rem;
+		}
+
+		select {
+			cursor: pointer;
+		}
+
+		input[type="text"] {
+			flex: 1;
+			min-width: 0;
+		}
+
+		/* ── Status dot ────────────────────────────────────── */
+
+		.status-dot {
+			display: inline-block;
+			width: 8px;
+			height: 8px;
+			border-radius: 50%;
+			margin-right: 0.3rem;
+			vertical-align: middle;
+			transition: all 0.3s ease;
+		}
+
+		.status-dot.offline {
+			background: #484f58;
+		}
+
+		.status-dot.online {
+			background: #3fb950;
+			box-shadow: 0 0 6px rgba(63, 185, 80, 0.6);
+		}
+
+		.status-row {
+			display: flex;
+			align-items: center;
+			gap: 1rem;
+			font-size: 0.78rem;
+			color: #8b949e;
+			margin-top: 0.4rem;
+		}
+
+		.status-label {
+			display: flex;
+			align-items: center;
+		}
+
+		/* ── Connection form ──────────────────────────────── */
+
+		.connect-form {
+			display: flex;
+			gap: 0.4rem;
+			align-items: center;
+			flex-wrap: wrap;
+		}
+
+		/* ── Log ───────────────────────────────────────────── */
+
+		pre#log {
+			font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', monospace;
+			font-size: 0.7rem;
+			color: #6e7681;
+			background: #0d1117;
+			border: 1px solid #21262d;
+			border-radius: 6px;
+			padding: 0.6rem;
+			max-height: 120px;
+			overflow-y: auto;
+			margin-top: 0.8rem;
+			white-space: pre-wrap;
+			word-break: break-all;
+		}
+
+		/* ── Responsive ───────────────────────────────────── */
+
+		@media (max-width: 600px) {
+			body { padding: 0.6rem; }
+			.panel { min-width: 100%; }
+			video { width: 160px; height: 120px; }
+			#matrixCanvas { width: 120px; height: 120px; }
+		}
+	</style>
+</head>
+<body>
+
+	<h1>MissingDrop <span>— 32×32 LED Matrix</span></h1>
+	<p class="subtitle">MediaPipe hand tracking · Water ripple · WebSocket bridge</p>
+
+	<div class="container">
+
+		<!-- ── Left panel: Camera & Preview ── -->
+		<div class="panel">
+			<h2>Preview</h2>
+			<div class="preview-area">
+				<div class="canvas-box">
+					<label>Camera</label>
+					<video id="video" class="hidden" autoplay playsinline></video>
+				</div>
+				<div class="canvas-box">
+					<label>Matrix Output</label>
+					<canvas id="matrixCanvas" width="32" height="32"></canvas>
+				</div>
+			</div>
+
+			<div class="controls">
+				<button id="btnStart" disabled>Start Tracking</button>
+				<button id="btnContinuous">Continuous: OFF</button>
+				<button id="btnClear">Reset Water</button>
+			</div>
+		</div>
+
+		<!-- ── Right panel: Settings & Connection ── -->
+		<div class="panel">
+			<h2>Water Drop</h2>
+
+			<div class="setting">
+				<label for="colorPicker">Tint Color</label>
+				<input type="color" id="colorPicker" value="#3c96ff">
+			</div>
+
+			<div class="setting">
+				<label for="strengthSlider">Strength</label>
+				<input type="range" id="strengthSlider" min="0.2" max="3.0" step="0.1" value="1.0">
+				<span id="strengthValue">1.0</span>
+			</div>
+
+			<div class="setting">
+				<label for="radiusSlider">Drop Radius</label>
+				<input type="range" id="radiusSlider" min="1" max="5" step="1" value="2">
+				<span id="radiusValue">2</span>
+			</div>
+
+			<h2 style="margin-top: 0.8rem;">Simulation</h2>
+
+			<div class="setting">
+				<label for="dampSlider">Damping</label>
+				<input type="range" id="dampSlider" min="0.950" max="0.999" step="0.001" value="0.985">
+				<span id="dampValue">0.985</span>
+			</div>
+
+			<div class="setting">
+				<label for="gainSlider">Render Gain</label>
+				<input type="range" id="gainSlider" min="0.5" max="6.0" step="0.1" value="2.3">
+				<span id="gainValue">2.3</span>
+			</div>
+
+			<h2 style="margin-top: 0.8rem;">WebSocket</h2>
+
+			<div class="connect-form">
+				<input type="text" id="serverUrl" placeholder="wss://your-app.onrender.com/ws" value="">
+				<select id="pairSelect">
+					<option value="1">Pair 1</option>
+					<option value="2">Pair 2</option>
+				</select>
+			</div>
+
+			<div class="controls">
+				<button id="btnConnect" class="primary">Connect</button>
+				<button id="btnTest">Test Frame</button>
+			</div>
+
+			<div class="status-row">
+				<div class="status-label">
+					<span id="statusDot" class="status-dot offline"></span> Phone
+				</div>
+				<div class="status-label">
+					<span id="matrixDot" class="status-dot offline"></span> Matrix
+				</div>
+			</div>
+		</div>
+
+	</div>
+
+	<pre id="log">Loading hand tracking model…</pre>
+
+	<script type="module" src="js/app.js"></script>
+
+</body>
+</html>
