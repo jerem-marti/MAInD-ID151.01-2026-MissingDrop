@@ -113,6 +113,26 @@ wss.on('connection', (ws) => {
             return
         }
 
+        if (msg.type === 'drop') {
+            // Broadcast drop to the OTHER pair's phone
+            // We want drop to appear on BOTH pairs.
+            // If Pair 1 sends drop, we send it to Pair 2's phone (and optionally back to Pair 1 if client doesn't do it locally, but client does it locally).
+            // Actually, requirements say "drop to be apply to the 2 pair".
+            
+            // Let's broadcast to ALL connected 'phone' clients in valid pairs, EXCEPT the sender (since sender does it locally).
+            // Or simpler: just broadcast to the OTHER pair.
+            
+            // Logic: if I am Pair 1, send to Pair 2. If I am Pair 2, send to Pair 1.
+            const targetPairId = clientPair === 1 ? 2 : 1
+            const targetPhone = pairs[targetPairId].phone
+            
+            if (targetPhone && targetPhone.readyState === 1) {
+                // Forward the drop message
+                sendJSON(targetPhone, msg)
+            }
+            return
+        }
+
         if (msg.type === 'join') {
             const { role, pair } = msg
 

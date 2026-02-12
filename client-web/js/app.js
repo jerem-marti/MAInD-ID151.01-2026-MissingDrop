@@ -8,9 +8,9 @@
  * WebSocket transmission is non-blocking (fire-and-forget binary send).
  */
 
-import { connect, disconnect, isConnected, sendImageData, setOnStatusChange, setOnError } from './wss.js'
+import { connect, disconnect, isConnected, sendImageData, setOnStatusChange, setOnError, setOnDrop, sendDrop } from './wss.js'
 import * as Hand from './hand.js'
-import * as Water from './water.js'
+import { WaterSimulation } from './water.js'
 
 const MATRIX_SIZE = 32
 
@@ -46,8 +46,15 @@ const matrixCtx = matrixCanvas.getContext('2d', { willReadFrequently: true })
 
 let modelReady = false
 let wasNotPinching = true
-let tintColor = { r: 60, g: 150, b: 255 }
+let localTint = { r: 60, g: 150, b: 255 }
+let remoteTint = { r: 255, g: 100, b: 100 } // Default remote color until updated
 let continuousDrop = false
+
+// Instantiate TWO simulations:
+// 1. localWater: driven by THIS user's hand
+// 2. remoteWater: driven by OTHER user's drops via WSS
+const localWater = new WaterSimulation()
+const remoteWater = new WaterSimulation()
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
 
@@ -69,6 +76,18 @@ setOnStatusChange((connected, statusMsg) => {
 
 setOnError((message) => {
     log('WSS error: ' + message)
+})
+
+setOnDrop((x, y, strength, radius, r, g, b) => {
+    // Received a drop from the other user!
+    // Update remote tint if color data is present
+    if (r !== undefined && g !== undefined && b !== undefined) {
+        remoteTint = { r, g, b }
+    }
+
+    // Trigger drop in the remote simulation layer
+    remoteWater.dropAt(x, y, { strength, radius })
+    // log(`Remote drop at (${x},${y})`)
 })
 
 // ─── Initialization ──────────────────────────────────────────────────────────
@@ -163,7 +182,15 @@ function processHandDetection() {
 
     if (pos && pinching) {
         if (wasNotPinching || continuousDrop) {
-            Water.dropAt(pos.x, pos.y)
+            // Trigger LOCAL drop
+            localWater.dropAt(pos.x, pos.y)
+
+            // Broadcast drop to remote (with our color)
+            // Use current parameter settings for strength/radius
+            const s = localWater.getDropStrength()
+            const r = localWater.getDropRadius()
+            sendDrop(pos.x, pos.y, s, r, localTint.r, localTint.g, localTint.b)
+
             if (wasNotPinching) {
                 log(`💧 Drop at (${pos.x}, ${pos.y})`)
             }
@@ -182,11 +209,69 @@ function mainLoop() {
         processHandDetection()
     }
 
-    // 2. Advance water simulation
-    Water.step()
+    // 2. Advance simulations
+    localWater.step()
+    remoteWater.step()
 
-    // 3. Render to ImageData with tint
-    const imageData = Water.getImageData(tintColor)
+    // 3. Output Rendering:
+    //    Base color is localTint.
+    //    Remote waves push the color towards remoteTint.
+
+    // Get raw shading maps (0.0 - 1.0)
+    const shadeLocal = localWater.getShadingMap()
+    const shadeRemote = remoteWater.getShadingMap()
+
+    const imageData = new ImageData(MATRIX_SIZE, MATRIX_SIZE)
+    const data = imageData.data
+
+    // Brightness boost factor to make colors pop
+    const BRIGHTNESS_BOOST = 2.0
+
+    // Total pixels
+    const N = MATRIX_SIZE * MATRIX_SIZE
+
+    for (let i = 0; i < N; i++) {
+        // Shading values are 0.0 - 1.0 (0.5 is flat water)
+        const s1 = shadeLocal[i]
+        const s2 = shadeRemote[i]
+
+        // Superposition of wave slopes (approximate)
+        // flat + (slope1 + slope2)
+        // s1 = 0.5 + slope1  -> slope1 = s1 - 0.5
+        // total = 0.5 + (s1 - 0.5) + (s2 - 0.5)
+        let totalShade = s1 + s2 - 0.5
+
+        // Clamp shade
+        if (totalShade < 0) totalShade = 0
+        if (totalShade > 1) totalShade = 1
+
+        // Calculate how much "remote activity" is here
+        // We use deviation from 0.5 as a proxy for wave height/slope
+        const remoteActivity = Math.abs(s2 - 0.5)
+
+        // Gain up the activity to make color shift more visible even for small ripples
+        // 4.0 is a magic number: higher = more sensitive color shift
+        let mixFactor = remoteActivity * 4.0
+        if (mixFactor > 1.0) mixFactor = 1.0
+
+        // Lerp color: local -> remote based on mixFactor
+        const r = localTint.r * (1 - mixFactor) + remoteTint.r * mixFactor
+        const g = localTint.g * (1 - mixFactor) + remoteTint.g * mixFactor
+        const b = localTint.b * (1 - mixFactor) + remoteTint.b * mixFactor
+
+        // Apply directional shading to the composed color AND boost brightness
+        const idx = i * 4
+
+        // Note: we can go above 255 before clamping if we want "HDR" highlights
+        const rFinal = r * totalShade * BRIGHTNESS_BOOST
+        const gFinal = g * totalShade * BRIGHTNESS_BOOST
+        const bFinal = b * totalShade * BRIGHTNESS_BOOST
+
+        data[idx + 0] = rFinal > 255 ? 255 : rFinal
+        data[idx + 1] = gFinal > 255 ? 255 : gFinal
+        data[idx + 2] = bFinal > 255 ? 255 : bFinal
+        data[idx + 3] = 255
+    }
 
     // 4. Preview on canvas
     matrixCtx.putImageData(imageData, 0, 0)
@@ -208,7 +293,7 @@ requestAnimationFrame(mainLoop)
 // Water tint color
 colorPicker.addEventListener('input', () => {
     const hex = colorPicker.value
-    tintColor = {
+    localTint = {
         r: parseInt(hex.slice(1, 3), 16),
         g: parseInt(hex.slice(3, 5), 16),
         b: parseInt(hex.slice(5, 7), 16)
@@ -218,28 +303,32 @@ colorPicker.addEventListener('input', () => {
 // Drop strength
 strengthSlider.addEventListener('input', () => {
     const val = parseFloat(strengthSlider.value)
-    Water.setDropStrength(val)
+    localWater.setDropStrength(val)
+    remoteWater.setDropStrength(val)
     strengthValue.textContent = val.toFixed(1)
 })
 
 // Drop radius
 radiusSlider.addEventListener('input', () => {
     const val = parseInt(radiusSlider.value)
-    Water.setDropRadius(val)
+    localWater.setDropRadius(val)
+    remoteWater.setDropRadius(val)
     radiusValue.textContent = val
 })
 
 // Wave damping
 dampSlider.addEventListener('input', () => {
     const val = parseFloat(dampSlider.value)
-    Water.setWaveDamp(val)
+    localWater.setWaveDamp(val)
+    remoteWater.setWaveDamp(val)
     dampValue.textContent = val.toFixed(3)
 })
 
 // Render gain
 gainSlider.addEventListener('input', () => {
     const val = parseFloat(gainSlider.value)
-    Water.setRenderGain(val)
+    localWater.setRenderGain(val)
+    remoteWater.setRenderGain(val)
     gainValue.textContent = val.toFixed(1)
 })
 
@@ -255,7 +344,8 @@ if (btnContinuous) {
 
 // Clear / Reset
 btnClear.addEventListener('click', () => {
-    Water.reset()
+    localWater.reset()
+    remoteWater.reset()
     log('Water reset.')
 })
 

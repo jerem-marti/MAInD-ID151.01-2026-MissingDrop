@@ -25,6 +25,7 @@ let connected = false
 // Callbacks for external status updates
 let onStatusChange = null
 let onError = null
+let onDrop = null
 
 /**
  * Register a callback for connection status changes.
@@ -40,6 +41,14 @@ export function setOnStatusChange(cb) {
  */
 export function setOnError(cb) {
     onError = cb
+}
+
+/**
+ * Register a callback for incoming drops from remote.
+ * @param {function} cb - Called with (x, y, strength, radius, r, g, b)
+ */
+export function setOnDrop(cb) {
+    onDrop = cb
 }
 
 /**
@@ -85,6 +94,10 @@ export function connect(url, pair) {
                     if (msg.type === 'kicked') {
                         connected = false
                         onStatusChange?.(false)
+                    }
+
+                    if (msg.type === 'drop') {
+                        onDrop?.(msg.x, msg.y, msg.strength, msg.radius, msg.r, msg.g, msg.b)
                     }
                 }
             }
@@ -150,6 +163,23 @@ export function sendImageData(imageData) {
         socket.send(PIXEL_BUFFER.buffer)
     } catch (err) {
         console.warn('WSS send skipped:', err.message)
+    }
+}
+
+/**
+ * Send a drop event to the server to be broadcasted.
+ */
+export function sendDrop(x, y, strength, radius, r, g, b) {
+    if (!isConnected()) return
+
+    try {
+        socket.send(JSON.stringify({
+            type: 'drop',
+            x, y, strength, radius,
+            r, g, b
+        }))
+    } catch (err) {
+        console.warn('WSS sendDrop skipped:', err.message)
     }
 }
 
