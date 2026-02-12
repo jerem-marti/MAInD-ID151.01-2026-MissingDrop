@@ -3,7 +3,7 @@
  *
  * Loop: detect → drop → simulate → render → send → next frame
  *
- * Pinch gesture triggers a water drop at the index finger position.
+ * Tap gesture triggers a water drop at the index finger position.
  * The simulation runs every frame regardless of hand presence.
  * WebSocket transmission is non-blocking (fire-and-forget binary send).
  */
@@ -45,7 +45,7 @@ const matrixCtx = matrixCanvas.getContext('2d', { willReadFrequently: true })
 // ─── State ───────────────────────────────────────────────────────────────────
 
 let modelReady = false
-let wasNotPinching = true
+let wasNotTapping = true
 let localTint = { r: 60, g: 150, b: 255 }
 let remoteTint = { r: 255, g: 100, b: 100 } // Default remote color until updated
 let continuousDrop = false
@@ -167,7 +167,7 @@ function stopTracking() {
     video.classList.add('hidden')
     btnStart.textContent = 'Start Tracking'
     btnStart.classList.remove('active')
-    wasNotPinching = true
+    wasNotTapping = true
     log('Hand tracking stopped.')
 }
 
@@ -178,10 +178,10 @@ function processHandDetection() {
     if (!results) return
 
     const pos = Hand.getIndexFingerTip(results)
-    const pinching = Hand.isPinching(results)
+    const tapping = Hand.isTapping(results)
 
-    if (pos && pinching) {
-        if (wasNotPinching || continuousDrop) {
+    if (pos && tapping) {
+        if (wasNotTapping || continuousDrop) {
             // Trigger LOCAL drop
             localWater.dropAt(pos.x, pos.y)
 
@@ -191,13 +191,13 @@ function processHandDetection() {
             const r = localWater.getDropRadius()
             sendDrop(pos.x, pos.y, s, r, localTint.r, localTint.g, localTint.b)
 
-            if (wasNotPinching) {
+            if (wasNotTapping) {
                 log(`💧 Drop at (${pos.x}, ${pos.y})`)
             }
         }
-        wasNotPinching = false
+        wasNotTapping = false
     } else {
-        wasNotPinching = true
+        wasNotTapping = true
     }
 }
 

@@ -140,26 +140,56 @@ export function getIndexFingerTip(results) {
     }
 }
 
+// ─── Tap Detection State ─────────────────────────────────────────────────────
+
+const TAP_HISTORY_SIZE = 8     // Number of frames to track
+const TAP_THRESHOLD = 0.02     // Minimum forward velocity to detect tap
+const tapHistory = []          // Circular buffer of index finger z positions
+
 /**
- * Check if the thumb and index finger are pinched together.
- * Uses the 3D Euclidean distance between THUMB_TIP (4) and INDEX_FINGER_TIP (8).
+ * Detect finger tap by tracking forward movement toward the camera.
+ * Uses the index finger tip position (landmark 8) z-coordinate.
+ * A tap is detected when the finger moves forward (negative z direction).
  * @param {object} results - MediaPipe hand results
- * @param {number} [threshold=0.07] - Normalized distance threshold (0–1 space)
- * @returns {boolean} true if pinching
+ * @param {number} [threshold=0.02] - Minimum velocity threshold for tap detection
+ * @returns {boolean} true if tapping
  */
-export function isPinching(results, threshold = 0.07) {
+export function isTapping(results, threshold = TAP_THRESHOLD) {
     if (!results || !results.landmarks || results.landmarks.length === 0) {
+        // Clear history when hand is lost
+        tapHistory.length = 0
         return false
     }
 
     const landmarks = results.landmarks[0]
-    const thumb = landmarks[4]  // THUMB_TIP
-    const index = landmarks[8]  // INDEX_FINGER_TIP
+    const indexTip = landmarks[8]  // INDEX_FINGER_TIP
 
-    const dx = thumb.x - index.x
-    const dy = thumb.y - index.y
-    const dz = (thumb.z || 0) - (index.z || 0)
-    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+    // Add current index finger z position to history
+    // Note: in MediaPipe, negative z = toward camera
+    tapHistory.push(indexTip.z || 0)
 
-    return dist < threshold
+    // Keep only recent history
+    if (tapHistory.length > TAP_HISTORY_SIZE) {
+        tapHistory.shift()
+    }
+
+    // Need enough history to detect motion
+    if (tapHistory.length < 5) {
+        return false
+    }
+
+    // Calculate velocity by comparing recent positions
+    // Recent frames should have MORE NEGATIVE z (closer to camera)
+    const recentAvg = (tapHistory[tapHistory.length - 1] +
+        tapHistory[tapHistory.length - 2] +
+        tapHistory[tapHistory.length - 3]) / 3
+
+    const previousAvg = (tapHistory[tapHistory.length - 4] +
+        tapHistory[tapHistory.length - 5] +
+        (tapHistory[tapHistory.length - 6] || tapHistory[tapHistory.length - 5])) / 3
+
+    // Forward velocity = previous - recent (should be positive when moving toward camera)
+    const velocity = previousAvg - recentAvg
+
+    return velocity > threshold
 }
