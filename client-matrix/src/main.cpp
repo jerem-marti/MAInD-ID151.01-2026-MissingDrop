@@ -27,9 +27,7 @@
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
 
-#if USE_ENTERPRISE_WIFI
-#include "esp_wpa2.h"
-#endif
+#include "wifi_client.h"
 
 // ─── SmartMatrix Configuration ───────────────────────────────────────────────
 
@@ -69,44 +67,7 @@ static uint8_t disconnectedCounter = 0;
 
 // ─── WiFi Connection ─────────────────────────────────────────────────────────
 
-void connectWiFi() {
-    Serial.println("Connecting to WiFi...");
-    pinMode(PICO_LED_PIN, OUTPUT);
-    digitalWrite(PICO_LED_PIN, HIGH);
 
-#if USE_ENTERPRISE_WIFI
-    // WPA2-Enterprise (e.g. eduroam)
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_STA);
-
-    esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)EAP_IDENTITY, strlen(EAP_IDENTITY));
-    esp_wifi_sta_wpa2_ent_set_username((uint8_t *)EAP_USERNAME, strlen(EAP_USERNAME));
-    esp_wifi_sta_wpa2_ent_set_password((uint8_t *)EAP_PASSWORD, strlen(EAP_PASSWORD));
-    esp_wifi_sta_wpa2_ent_enable();
-
-    WiFi.begin(WIFI_SSID);
-#else
-    // WPA2-Personal
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-#endif
-
-    uint32_t startTime = millis();
-    bool ledState = false;
-
-    while (WiFi.status() != WL_CONNECTED) {
-        if (millis() - startTime > WIFI_TIMEOUT) {
-            Serial.println("WiFi timeout — restarting...");
-            ESP.restart();
-        }
-        ledState = !ledState;
-        digitalWrite(PICO_LED_PIN, ledState);
-        delay(250);
-    }
-
-    digitalWrite(PICO_LED_PIN, LOW);
-    Serial.print("WiFi connected! IP: ");
-    Serial.println(WiFi.localIP());
-}
 
 // ─── RGB565 → RGB24 Conversion ──────────────────────────────────────────────
 
@@ -174,7 +135,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
             if (disconnectedCounter >= 3) {
                 Serial.printf("[WS] Disconnected %d times, checking WiFi...\n", disconnectedCounter);
                 if (WiFi.status() != WL_CONNECTED) {
-                    connectWiFi();
+                    connectToWiFi();
                 }
             }
             break;
@@ -228,6 +189,10 @@ void setup() {
 #endif
 
     // Initialize LED matrix
+    // Connect WiFi (Before Matrix, to ensure heap availability for WPA2 handshake)
+    connectToWiFi();
+
+    // Initialize LED matrix
     bg.enableColorCorrection(true);
     matrix.addLayer(&bg);
     matrix.setBrightness(255);
@@ -239,9 +204,6 @@ void setup() {
         buffer[i] = rgb24(0, 0, 30); // dim blue
     }
     bg.swapBuffers();
-
-    // Connect WiFi
-    connectWiFi();
 
     // Connect WebSocket
     setupWebSocket();
@@ -256,9 +218,5 @@ void loop() {
     }
 
     // Reconnect WiFi if lost
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("WiFi lost — reconnecting...");
-        connectWiFi();
-        setupWebSocket();
-    }
+    checkWiFiConnection();
 }
