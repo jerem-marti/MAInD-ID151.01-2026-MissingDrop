@@ -327,13 +327,40 @@ function mainLoop() {
     if (isConnected()) {
         const now = performance.now()
         if (now - lastSendTime >= 33) { // 33ms ≈ 30 FPS
-            sendImageData(imageData)
+            // ROTATE 90° CCW before sending
+            const rotated = rotateImageDataCCW(imageData)
+            sendImageData(rotated)
             lastSendTime = now
         }
     }
 
     // 6. Next frame
     requestAnimationFrame(mainLoop)
+}
+
+function rotateImageDataCCW(src) {
+    const w = MATRIX_SIZE
+    const h = MATRIX_SIZE
+    const dest = new ImageData(w, h)
+    const srcData = src.data
+    const destData = dest.data
+
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            // 90° CCW: (x, y) -> (y, w - 1 - x)
+            const newX = y
+            const newY = w - 1 - x
+
+            const srcIdx = (y * w + x) * 4
+            const destIdx = (newY * w + newX) * 4
+
+            destData[destIdx + 0] = srcData[srcIdx + 0]
+            destData[destIdx + 1] = srcData[srcIdx + 1]
+            destData[destIdx + 2] = srcData[srcIdx + 2]
+            destData[destIdx + 3] = srcData[srcIdx + 3]
+        }
+    }
+    return dest
 }
 
 // Start the loop immediately

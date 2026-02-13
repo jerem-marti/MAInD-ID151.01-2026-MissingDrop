@@ -35,7 +35,4 @@
 // Which pair this matrix belongs to (1 or 2)
 #define PAIR_ID 1
 
-// ─── Display Rotation ───────────────────────────────────────────────────────
-#define MATRIX_ROTATION rotation0 // Options: rotation0, rotation90, rotation180, rotation270
-
 #endif // CONFIG_H

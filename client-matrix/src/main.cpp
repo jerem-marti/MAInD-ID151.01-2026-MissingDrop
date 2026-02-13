@@ -207,7 +207,6 @@ void setup() {
     bg.enableColorCorrection(true);
     matrix.addLayer(&bg);
     matrix.setBrightness(255);
-    matrix.setRotation(MATRIX_ROTATION);
     matrix.begin();
 
     // Show a brief startup color
