@@ -49,6 +49,7 @@ let wasNotTapping = true
 let localTint = { r: 60, g: 150, b: 255 }
 let remoteTint = { r: 255, g: 100, b: 100 } // Default remote color until updated
 let continuousDrop = false
+let lastSendTime = 0
 
 // Instantiate TWO simulations:
 // 1. localWater: driven by THIS user's hand
@@ -322,9 +323,13 @@ function mainLoop() {
     // 4. Preview on canvas
     matrixCtx.putImageData(imageData, 0, 0)
 
-    // 5. Send to matrix via WSS (fire-and-forget)
+    // 5. Send to matrix via WSS (throttled to ~30 FPS)
     if (isConnected()) {
-        sendImageData(imageData)
+        const now = performance.now()
+        if (now - lastSendTime >= 33) { // 33ms ≈ 30 FPS
+            sendImageData(imageData)
+            lastSendTime = now
+        }
     }
 
     // 6. Next frame

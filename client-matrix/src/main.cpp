@@ -100,6 +100,10 @@ void displayFrame(const uint8_t* data, size_t length) {
 
 // ─── WebSocket Event Handler ─────────────────────────────────────────────────
 
+static bool newFrameReceived = false;
+
+// ─── WebSocket Event Handler ─────────────────────────────────────────────────
+
 void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
     switch (type) {
         case WStype_CONNECTED:
@@ -124,7 +128,13 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 
         case WStype_BIN:
             // Binary frame: RGB565 pixel data
-            displayFrame(payload, length);
+            // DECOUPLED: Copy to buffer, set flag, but don't draw yet.
+            if (length == BUFFER_SIZE) {
+                memcpy(frameBuf, payload, length);
+                newFrameReceived = true;
+            } else {
+                Serial.printf("Frame size mismatch: got %u, expected %u\n", length, BUFFER_SIZE);
+            }
             break;
 
         case WStype_DISCONNECTED:
@@ -178,6 +188,7 @@ void setupWebSocket() {
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
 void setup() {
+    setCpuFrequencyMhz(240); // Ensure max speed
     Serial.begin(115200);
     Serial.println("\n=== MissingDrop Matrix Client ===");
     Serial.printf("Pair ID: %d\n", PAIR_ID);
@@ -196,6 +207,7 @@ void setup() {
     bg.enableColorCorrection(true);
     matrix.addLayer(&bg);
     matrix.setBrightness(255);
+    matrix.setRotation(MATRIX_ROTATION);
     matrix.begin();
 
     // Show a brief startup color
@@ -215,6 +227,12 @@ void loop() {
     // Process WebSocket events (reconnect is handled internally)
     if (webSocket) {
         webSocket->loop();
+    }
+
+    // Render latest frame if available (SKIP drawing old frames if multiple arrived)
+    if (newFrameReceived) {
+        newFrameReceived = false;
+        displayFrame(frameBuf, BUFFER_SIZE);
     }
 
     // Reconnect WiFi if lost
